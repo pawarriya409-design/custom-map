@@ -30,6 +30,7 @@
     </div>
 
     <script>
+        // Match the exact columns from OW_data_final_with_coords.csv
         const CONFIG = {
             CSV_FILENAME: "OW_data_final_with_coords.csv",
             COL_LOCATION: "mepan_mepid",
@@ -39,50 +40,64 @@
             COL_VALUE: "KRW_Value"
         };
 
-        // RD to GPS Coordinate Converter
+        // Standard Dutch RD coordinate converter to GPS Lat/Lon (WGS84)
         function rdToWgs84(x, y) {
-            var x0 = 155000; var y0 = 463000;
-            var dX = (x - x0) * 1e-5; var dY = (y - y0) * 1e-5;
+            var x0 = 155000;
+            var y0 = 463000;
+            var dX = (x - x0) * 1e-5;
+            var dY = (y - y0) * 1e-5;
             var SomN = (3235.65389 * dY) + (-32.51758 * Math.pow(dX, 2)) + (-0.2475 * Math.pow(dY, 2)) + (-0.84978 * Math.pow(dX, 2) * dY) + (-0.0655 * Math.pow(dY, 3)) + (-0.01712 * Math.pow(dX, 2) * Math.pow(dY, 2)) + (-0.00527 * Math.pow(dX, 4)) + (0.00971 * Math.pow(dX, 4) * dY) + (-0.00114 * Math.pow(dX, 2) * Math.pow(dY, 3)) + (-0.00039 * Math.pow(dX, 4) * Math.pow(dY, 2));
             var SomE = (5260.52916 * dX) + (105.94684 * dX * dY) + (2.45656 * dX * Math.pow(dY, 2)) + (-0.81885 * Math.pow(dX, 3)) + (0.05594 * dX * Math.pow(dY, 3)) + (-0.05607 * Math.pow(dX, 3) * dY) + (0.01199 * dX * Math.pow(dY, 4)) + (-0.00256 * Math.pow(dX, 3) * Math.pow(dY, 2)) + (0.00211 * dX * Math.pow(dX, 4)) + (0.00026 * Math.pow(dX, 3) * Math.pow(dY, 3));
-            return [52.15543 + (SomN / 3600), 5.387206 + (SomE / 3600)];
+            var lat = 52.15543 + (SomN / 3600);
+            var lon = 5.387206 + (SomE / 3600);
+            return [lat, lon];
         }
 
+        // Initialize Map centered near Aa en Maas region
         var map = L.map('map-container').setView([51.68, 5.78], 10); 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
-
-        // ==========================================
-        // NEW: Try to load an exact River boundary file (if you have one)
-        // ==========================================
-        fetch('river.geojson')
-            .then(response => response.json())
-            .then(geojsonData => {
-                L.geoJSON(geojsonData, {
-                    style: { color: '#222', weight: 4, opacity: 0.9 } // Thick dark line
-                }).addTo(map);
-            })
-            .catch(e => console.log("No river.geojson found. Skipping exact river path."));
 
         var ctx = document.getElementById('phosphateChart').getContext('2d');
         var myChart = new Chart(ctx, {
             type: 'line',
             data: { labels: [], datasets: [] },
             options: { 
-                responsive: true, maintainAspectRatio: false,
-                scales: { y: { beginAtZero: true, title: { display: true, text: 'Phosphate (mg/l)' } }, x: { title: { display: true, text: 'Year' } } } 
+                responsive: true, 
+                maintainAspectRatio: false,
+                scales: { 
+                    y: { beginAtZero: true, title: { display: true, text: 'Phosphate (mg/l)' } },
+                    x: { title: { display: true, text: 'Year' } }
+                } 
             }
         });
 
+        // Parse the CSV from the repository folder
         Papa.parse(CONFIG.CSV_FILENAME, {
-            download: true, header: true, dynamicTyping: true, skipEmptyLines: true,
+            download: true,
+            header: true,
+            dynamicTyping: true,
+            skipEmptyLines: true,
             complete: function(results) {
                 document.getElementById('loading').style.display = 'none';
                 processData(results.data);
             },
             error: function(err) {
-                document.getElementById('loading').innerText = "Error loading CSV on GitHub.";
+                document.getElementById('loading').innerHTML = "Error loading file directly. Trying alternative fetch...";
+                // Fallback attempt in case relative paths are acting up on GitHub Pages
+                fetch(CONFIG.CSV_FILENAME)
+                    .then(response => response.text())
+                    .then(text => {
+                        document.getElementById('loading').style.display = 'none';
+                        var parsed = Papa.parse(text, { header: true, dynamicTyping: true, skipEmptyLines: true });
+                        processData(parsed.data);
+                    })
+                    .catch(e => {
+                        document.getElementById('loading').style.background = "red";
+                        document.getElementById('loading').style.color = "white";
+                        document.getElementById('loading').innerText = "File read failed. Double check if file name is exactly: " + CONFIG.CSV_FILENAME;
+                    });
             }
         });
 
@@ -98,49 +113,55 @@
 
                 if (!loc || !rdX || !rdY || !year) return;
 
+                // If this is a new location, convert its RD coordinates to Lat/Lon once
                 if (!groupedData[loc]) {
-                    groupedData[loc] = { coords: rdToWgs84(rdX, rdY), history: {} };
+                    let gpsCoords = rdToWgs84(rdX, rdY);
+                    groupedData[loc] = { coords: gpsCoords, history: {} };
                 }
+                
+                // Save values (leave blank if missing in data)
                 groupedData[loc].history[year] = (val !== undefined && val !== null) ? val : null;
             });
 
             let allCoords = [];
             Object.keys(groupedData).forEach(locName => {
                 let locInfo = groupedData[locName];
-                if (isNaN(locInfo.coords[0])) return;
+                
+                // Protect against conversion edge cases
+                if (isNaN(locInfo.coords[0]) || isNaN(locInfo.coords[1])) return;
                 
                 allCoords.push(locInfo.coords);
                 
                 var marker = L.marker(locInfo.coords).addTo(map);
                 marker.bindTooltip("<b>" + locName + "</b>");
-                marker.on('click', function() { updateChart(locName, locInfo.history); });
+                
+                marker.on('click', function() {
+                    updateChart(locName, locInfo.history);
+                });
             });
 
-            // ==========================================
-            // NEW: Draw a conceptual "Connect the Dots" line
-            // ==========================================
-            if(allCoords.length > 1) {
-                L.polyline(allCoords, {
-                    color: '#005A9C', 
-                    weight: 2, 
-                    dashArray: '5, 10', // Makes it dashed
-                    opacity: 0.6
-                }).addTo(map);
+            if(allCoords.length > 0) {
+                map.fitBounds(allCoords);
             }
-
-            if(allCoords.length > 0) { map.fitBounds(allCoords); }
         }
 
         function updateChart(stationName, historyData) {
             document.getElementById('chart-title').innerText = 'Phosphate Trend: ' + stationName;
+            
             let years = Object.keys(historyData).sort((a,b) => a - b);
             let values = years.map(y => historyData[y]);
 
             myChart.data.labels = years;
             myChart.data.datasets = [{
                 label: 'Fosfor totaal-P (mg/l)',
-                data: values, borderColor: '#005A9C', backgroundColor: 'rgba(0, 90, 156, 0.1)',
-                borderWidth: 2, fill: true, spanGaps: true, tension: 0.15, pointRadius: 4
+                data: values,
+                borderColor: '#005A9C',
+                backgroundColor: 'rgba(0, 90, 156, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                spanGaps: true, // Connect lines smoothly even if a year is missing data
+                tension: 0.15,
+                pointRadius: 4
             }];
             myChart.update();
         }
