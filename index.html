@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Interactive Water Dashboard</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        body { display: flex; margin: 0; height: 100vh; font-family: Arial; }
+        #map-container { width: 50%; height: 100%; border-right: 2px solid #ccc; }
+        #chart-container { width: 50%; height: 100%; padding: 20px; box-sizing: border-box; }
+        canvas { max-height: 100%; }
+    </style>
+</head>
+<body>
+
+    <div id="map-container"></div>
+    
+    <div id="chart-container">
+        <h3 id="chart-title" style="color: #005A9C;">Select a location on the map</h3>
+        <canvas id="flowChart"></canvas>
+    </div>
+
+    <script>
+        // 1. Initialize the Leaflet Map (Centered near Noord-Brabant based on your image)
+        var map = L.map('map-container').setView([51.68, 5.78], 11);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        // 2. Dummy Data (You will replace this with your actual data)
+        var riverData = {
+            "Station Mill": { coords: [51.6865, 5.7792], history: [2.1, 2.5, 1.8, 3.4, 2.2, 1.9, 4.0] },
+            "Station Zeeland": { coords: [51.6961, 5.6756], history: [1.1, 1.5, 1.2, 1.8, 1.3, 1.0, 2.1] }
+        };
+
+        var labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"]; // Time axis
+
+        // 3. Initialize an empty Chart.js Line Chart
+        var ctx = document.getElementById('flowChart').getContext('2d');
+        var myChart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: labels, datasets: [] },
+            options: {
+                responsive: true,
+                scales: { y: { beginAtZero: true, title: { display: true, text: 'Afvoer (m3/s)' } } }
+            }
+        });
+
+        // 4. Function to update the chart when a map marker is clicked
+        function updateChart(stationName) {
+            document.getElementById('chart-title').innerText = "Data for: " + stationName;
+            myChart.data.datasets = [{
+                label: 'Water Discharge (afvoer)',
+                data: riverData[stationName].history,
+                borderColor: '#005A9C',
+                backgroundColor: 'rgba(0, 90, 156, 0.2)',
+                borderWidth: 2,
+                fill: true
+            }];
+            myChart.update();
+        }
+
+        // 5. Add markers to the map and attach click events
+        for (var station in riverData) {
+            var marker = L.marker(riverData[station].coords).addTo(map);
+            marker.bindTooltip(station);
+            
+            // This is the interactive trigger
+            marker.on('click', (function(statName) {
+                return function() {
+                    updateChart(statName);
+                };
+            })(station));
+        }
+    </script>
+</body>
+</html>
